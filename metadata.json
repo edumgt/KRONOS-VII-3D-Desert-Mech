@@ -1,0 +1,6 @@
+{
+  "name": "KRONOS-VII — 3D Desert Mech",
+  "description": "Interactive Three.js 3D diorama of a colossal alien mech towering in a desert canyon with a continuous 360-degree cinematic drone orbit.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
