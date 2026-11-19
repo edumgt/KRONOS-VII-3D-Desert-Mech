@@ -5,12 +5,14 @@ import MechViewport, { MechActionKey, TelemetrySnapshot } from '@/components/Mec
 import ControlDock from '@/components/ControlDock';
 import { AtmospherePreset, CameraMode } from '@/lib/scene/cameraRig';
 import { createEmptyInput, MechInputState } from '@/lib/scene/mechController';
+import { MechStyleId, getMechStyleConfig } from '@/lib/scene/mechStyles';
 
 export default function HomePage() {
   const [isPlaying, setIsPlaying] = useState(true);
   const [speed, setSpeed] = useState(1.0);
   const [cameraMode, setCameraMode] = useState<CameraMode>('orbit360');
   const [atmosphere, setAtmosphere] = useState<AtmospherePreset>('sunbreak');
+  const [mechStyle, setMechStyle] = useState<MechStyleId>('apex');
   const [resetTrigger, setResetTrigger] = useState(0);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [telemetry, setTelemetry] = useState<TelemetrySnapshot>({
@@ -75,11 +77,14 @@ export default function HomePage() {
     setResetTrigger((n) => n + 1);
   }, []);
 
+  const activeStyleConfig = getMechStyleConfig(mechStyle);
+
   return (
     <main
       className="fixed inset-0 w-full h-full overflow-hidden bg-[#181411]"
       data-camera-mode={cameraMode}
       data-orbit-playing={String(isPlaying)}
+      data-mech-style={mechStyle}
       data-azimuth={telemetry.azimuthDeg}
       data-mech-x={telemetry.mechX}
       data-mech-y={telemetry.mechY}
@@ -93,6 +98,7 @@ export default function HomePage() {
         speed={speed}
         cameraMode={cameraMode}
         atmosphere={atmosphere}
+        mechStyle={mechStyle}
         resetTrigger={resetTrigger}
         virtualInputRef={virtualInputRef}
         onUserDragStart={handleUserDragStart}
@@ -102,10 +108,10 @@ export default function HomePage() {
       {/* Minimal Top-Left Scene Identity */}
       <header className="fixed top-4 left-5 z-10 pointer-events-none">
         <h1 className="font-display text-lg sm:text-xl font-semibold tracking-wide text-stone-50 [text-shadow:0_2px_10px_rgba(0,0,0,0.95)]">
-          KRONOS-VII
+          KRONOS-VII · {activeStyleConfig.label}
         </h1>
         <p className="text-xs text-stone-100/95 [text-shadow:0_1px_8px_rgba(0,0,0,0.98)]">
-          Desert Canyon Colossus · 64m Scale
+          {activeStyleConfig.subtitle} · 64m Scale
         </p>
       </header>
 
@@ -149,6 +155,8 @@ export default function HomePage() {
         onSelectCameraMode={handleSelectCameraMode}
         atmosphere={atmosphere}
         onSelectAtmosphere={setAtmosphere}
+        mechStyle={mechStyle}
+        onSelectMechStyle={setMechStyle}
         onResetOrbit={handleResetOrbit}
         onActionHold={handleActionHold}
         activeActionLabel={telemetry.activeAction}

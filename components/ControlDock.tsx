@@ -9,9 +9,11 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Sparkles,
   Sun,
 } from 'lucide-react';
 import { AtmospherePreset, CameraMode } from '@/lib/scene/cameraRig';
+import { MECH_STYLE_LIST, MechStyleId } from '@/lib/scene/mechStyles';
 import { MechActionKey } from './MechViewport';
 
 export interface ControlDockProps {
@@ -23,6 +25,8 @@ export interface ControlDockProps {
   onSelectCameraMode: (mode: CameraMode) => void;
   atmosphere: AtmospherePreset;
   onSelectAtmosphere: (preset: AtmospherePreset) => void;
+  mechStyle: MechStyleId;
+  onSelectMechStyle: (style: MechStyleId) => void;
   onResetOrbit: () => void;
   onActionHold: (action: MechActionKey, active: boolean) => void;
   activeActionLabel: string;
@@ -76,6 +80,8 @@ export default function ControlDock({
   onSelectCameraMode,
   atmosphere,
   onSelectAtmosphere,
+  mechStyle,
+  onSelectMechStyle,
   onResetOrbit,
   onActionHold,
   activeActionLabel,
@@ -211,7 +217,7 @@ export default function ControlDock({
             <div
               role="group"
               aria-label="Atmosphere Preset"
-              className="flex items-center gap-0.5"
+              className="flex items-center gap-0.5 pr-2 border-r border-white/10"
             >
               <Sun className="w-3.5 h-3.5 text-amber-300/80 mr-1 shrink-0" aria-hidden="true" />
               {ATMOSPHERE_OPTIONS.map((opt) => {
@@ -229,6 +235,39 @@ export default function ControlDock({
                     }`}
                   >
                     {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom Mech Armor Style Presets */}
+            <div
+              role="group"
+              aria-label="Mech Custom Style"
+              className="flex items-center gap-0.5"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-cyan-300 mr-1 shrink-0" aria-hidden="true" />
+              {MECH_STYLE_LIST.map((st) => {
+                const active = mechStyle === st.id;
+                const activeClass =
+                  st.id === 'stealth'
+                    ? 'bg-rose-500/30 text-rose-200 border border-rose-400/50 font-semibold'
+                    : st.id === 'sovereign'
+                      ? 'bg-amber-400/30 text-amber-100 border border-amber-300/60 font-semibold'
+                      : 'bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 font-semibold';
+                return (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() => onSelectMechStyle(st.id)}
+                    aria-pressed={active}
+                    className={`px-1.5 sm:px-2 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                      active
+                        ? activeClass
+                        : 'text-stone-300 hover:text-white hover:bg-white/10 border border-transparent'
+                    }`}
+                  >
+                    {st.label}
                   </button>
                 );
               })}

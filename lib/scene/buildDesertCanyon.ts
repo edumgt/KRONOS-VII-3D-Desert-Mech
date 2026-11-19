@@ -2,11 +2,13 @@ import * as THREE from 'three';
 import { AtmospherePreset } from './cameraRig';
 import { getForegroundHumanPlacements, groundHeightAt } from './desertTerrain';
 import { SceneMaterialLibrary } from './proceduralMaterials';
+import { buildSandParticles } from './buildSandParticles';
+import { SandMechContext } from './sandParticleSim';
 
 export interface DesertCanyonHandle {
   group: THREE.Group;
   setAtmosphere: (preset: AtmospherePreset, scene: THREE.Scene, keyLight: THREE.DirectionalLight, hemiLight: THREE.HemisphereLight, rimLight: THREE.DirectionalLight) => void;
-  update: (elapsedSec: number, deltaSec: number) => void;
+  update: (elapsedSec: number, deltaSec: number, mech?: SandMechContext) => void;
   dispose: () => void;
 }
 
@@ -116,7 +118,10 @@ const GODRAY_FRAGMENT_SHADER = `
   }
 `;
 
-export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandle {
+export function buildDesertCanyon(
+  mats: SceneMaterialLibrary,
+  pixelRatio = 1,
+): DesertCanyonHandle {
   const root = new THREE.Group();
   root.name = 'DesertCanyonEnvironment';
 
@@ -406,42 +411,10 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
   }
 
   // =========================================================================
-  // 5. DRIFTING DESERT DUST PARTICLES (subtle atmospheric motes)
+  // 5. BLOWING DESERT SAND PARTICLE SYSTEM (multi-layer wind & mech wake)
   // =========================================================================
-  const dustCount = 680;
-  const dustPositions = new Float32Array(dustCount * 3);
-  const dustSeeds = new Float32Array(dustCount);
-
-  let dSeed = 2026;
-  const dRand = () => {
-    dSeed = (dSeed * 16807) % 2147483647;
-    return (dSeed - 1) / 2147483646;
-  };
-
-  for (let i = 0; i < dustCount; i++) {
-    dustPositions[i * 3] = (dRand() - 0.5) * 180;
-    dustPositions[i * 3 + 1] = 1.0 + dRand() * 68;
-    dustPositions[i * 3 + 2] = (dRand() - 0.5) * 180;
-    dustSeeds[i] = dRand() * Math.PI * 2;
-  }
-
-  const dustGeo = trackGeo(new THREE.BufferGeometry());
-  dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
-
-  const dustMat = trackMat(
-    new THREE.PointsMaterial({
-      size: 0.44,
-      map: mats.dustSpriteTexture,
-      transparent: true,
-      opacity: 0.24,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      color: 0xffdeb0,
-    }),
-  );
-
-  const dustPoints = new THREE.Points(dustGeo, dustMat);
-  root.add(dustPoints);
+  const sandParticles = buildSandParticles(2200, pixelRatio);
+  root.add(sandParticles.object);
 
   const setAtmosphere = (
     preset: AtmospherePreset,
@@ -460,7 +433,6 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
 
       godrayUniforms.uColor.value.setHex(0xffe7bd);
       godrayUniforms.uOpacity.value = 0.048;
-      dustMat.color.setHex(0xffdeb0);
 
       keyLight.color.setHex(0xffe7bc);
       keyLight.intensity = 3.35;
@@ -475,6 +447,7 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
 
       scene.fog = new THREE.FogExp2(0xd8c19f, 0.0034);
       scene.background = new THREE.Color(0xd8c19f);
+      sandParticles.setAtmosphere(preset, 0xd8c19f, 0.0034);
     } else if (preset === 'dusk') {
       skyUniforms.uSunDir.value.set(0.75, 0.22, -0.62).normalize();
       skyUniforms.uSkyTop.value.setHex(0x1f283b);
@@ -485,7 +458,6 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
 
       godrayUniforms.uColor.value.setHex(0xffae66);
       godrayUniforms.uOpacity.value = 0.095;
-      dustMat.color.setHex(0xffb77d);
 
       keyLight.color.setHex(0xffa75e);
       keyLight.intensity = 3.3;
@@ -500,6 +472,7 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
 
       scene.fog = new THREE.FogExp2(0xc77e52, 0.0044);
       scene.background = new THREE.Color(0xc77e52);
+      sandParticles.setAtmosphere(preset, 0xc77e52, 0.0044);
     } else {
       // 'storm' — dramatic overcast cyan-charged desert squall
       skyUniforms.uSunDir.value.set(0.45, 0.55, -0.68).normalize();
@@ -511,7 +484,6 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
 
       godrayUniforms.uColor.value.setHex(0xbbe8f2);
       godrayUniforms.uOpacity.value = 0.065;
-      dustMat.color.setHex(0xc8d9de);
 
       keyLight.color.setHex(0xdbeaf0);
       keyLight.intensity = 2.4;
@@ -526,24 +498,13 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
 
       scene.fog = new THREE.FogExp2(0x8a9396, 0.0052);
       scene.background = new THREE.Color(0x8a9396);
+      sandParticles.setAtmosphere(preset, 0x8a9396, 0.0052);
     }
   };
 
-  const update = (elapsedSec: number, deltaSec: number) => {
+  const update = (elapsedSec: number, deltaSec: number, mech?: SandMechContext) => {
     skyUniforms.uTime.value = elapsedSec;
-
-    const dt = Math.min(deltaSec, 0.1);
-    const attr = dustGeo.attributes.position as THREE.BufferAttribute;
-    for (let i = 0; i < dustCount; i++) {
-      let x = attr.getX(i) + dt * 2.4;
-      let y = attr.getY(i) + Math.sin(elapsedSec * 0.7 + dustSeeds[i]) * dt * 0.45;
-      const z = attr.getZ(i) + Math.cos(elapsedSec * 0.4 + dustSeeds[i]) * dt * 0.6;
-      if (x > 90) x = -90;
-      if (y > 70) y = 2;
-      if (y < 1) y = 65;
-      attr.setXYZ(i, x, y, z);
-    }
-    attr.needsUpdate = true;
+    sandParticles.update(elapsedSec, deltaSec, mech);
   };
 
   return {
@@ -551,6 +512,7 @@ export function buildDesertCanyon(mats: SceneMaterialLibrary): DesertCanyonHandl
     setAtmosphere,
     update,
     dispose: () => {
+      sandParticles.dispose();
       geometries.forEach((g) => g.dispose());
       materials.forEach((m) => m.dispose());
     },

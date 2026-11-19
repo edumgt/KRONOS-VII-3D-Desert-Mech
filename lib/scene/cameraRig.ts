@@ -87,20 +87,20 @@ export function computeCameraPose(
   const yaw = mechOrigin.yaw;
 
   if (mode === 'cockpit') {
-    // Positioned cleanly at the forward cranial/visor bridge looking over the desert canyon
+    // Positioned cleanly at the forward visor bridge looking over the desert canyon
     const sinY = Math.sin(yaw);
     const cosY = Math.cos(yaw);
-    const camOffsetFwd = 13.1;
+    const camOffsetFwd = 10.6;
     const x = mx + sinY * camOffsetFwd;
     const z = mz + cosY * camOffsetFwd;
-    const y = my + 49.4;
+    const y = my + 54.4;
     const lookDist = 94;
     return {
       x,
       y,
       z,
       targetX: mx + sinY * lookDist,
-      targetY: my + 34.5,
+      targetY: my + 38.0,
       targetZ: mz + cosY * lookDist,
       azimuthDeg: normalizeAzimuthDeg(yaw),
     };

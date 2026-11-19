@@ -25,6 +25,7 @@ import {
   stepMechKinematics,
 } from '@/lib/scene/mechController';
 import { createSceneMaterialLibrary } from '@/lib/scene/proceduralMaterials';
+import { MechStyleId } from '@/lib/scene/mechStyles';
 import { buildAlienMech } from '@/lib/scene/buildAlienMech';
 import { buildCockpitRig } from '@/lib/scene/buildCockpitRig';
 import { buildDesertCanyon } from '@/lib/scene/buildDesertCanyon';
@@ -48,6 +49,7 @@ interface MechViewportProps {
   speed: number;
   cameraMode: CameraMode;
   atmosphere: AtmospherePreset;
+  mechStyle: MechStyleId;
   resetTrigger: number;
   virtualInputRef: React.MutableRefObject<MechInputState>;
   onUserDragStart: () => void;
@@ -58,6 +60,13 @@ interface MechViewportProps {
 const _targetVec = new THREE.Vector3();
 const _desiredPos = new THREE.Vector3();
 const _mergedInput = createEmptyInput();
+const _sandMechCtx = {
+  mechX: 0,
+  mechY: 0,
+  mechZ: 0,
+  moveSpeed: 0,
+  grounded: true,
+};
 
 function mapCodeToAction(code: string): MechActionKey | null {
   switch (code) {
@@ -130,6 +139,7 @@ export default function MechViewport({
   speed,
   cameraMode,
   atmosphere,
+  mechStyle,
   resetTrigger,
   virtualInputRef,
   onUserDragStart,
@@ -144,6 +154,7 @@ export default function MechViewport({
     speed,
     cameraMode,
     atmosphere,
+    mechStyle,
     onUserDragStart,
     onTelemetryUpdate,
   });
@@ -153,14 +164,16 @@ export default function MechViewport({
       speed,
       cameraMode,
       atmosphere,
+      mechStyle,
       onUserDragStart,
       onTelemetryUpdate,
     };
-  }, [isPlaying, speed, cameraMode, atmosphere, onUserDragStart, onTelemetryUpdate]);
+  }, [isPlaying, speed, cameraMode, atmosphere, mechStyle, onUserDragStart, onTelemetryUpdate]);
 
-  // Expose imperative handles for atmosphere updates & orbit/mech reset
+  // Expose imperative handles for atmosphere, style updates & orbit/mech reset
   const sceneHooksRef = useRef<{
     applyAtmosphere?: (preset: AtmospherePreset) => void;
+    applyMechStyle?: (styleId: MechStyleId) => void;
     resetOrbit?: () => void;
     notifyModeChange?: (mode: CameraMode) => void;
   }>({});
@@ -168,6 +181,10 @@ export default function MechViewport({
   useEffect(() => {
     sceneHooksRef.current.applyAtmosphere?.(atmosphere);
   }, [atmosphere]);
+
+  useEffect(() => {
+    sceneHooksRef.current.applyMechStyle?.(mechStyle);
+  }, [mechStyle]);
 
   useEffect(() => {
     sceneHooksRef.current.notifyModeChange?.(cameraMode);
@@ -289,13 +306,14 @@ export default function MechViewport({
 
     // Build Procedural Materials, 64m Alien Mech, 3D Cockpit Interior, and Desert Canyon
     const mats = createSceneMaterialLibrary(renderer, isSoftwareGl);
+    mats.applyMechStyle(propsRef.current.mechStyle);
     const mech = buildAlienMech(mats);
     scene.add(mech.group);
 
     const cockpitRig = buildCockpitRig(mats, renderer.capabilities.getMaxAnisotropy());
     camera.add(cockpitRig.group);
 
-    const canyon = buildDesertCanyon(mats);
+    const canyon = buildDesertCanyon(mats, renderer.getPixelRatio());
     scene.add(canyon.group);
     canyon.setAtmosphere(propsRef.current.atmosphere, scene, keyLight, hemiLight, rimLight);
 
@@ -374,6 +392,9 @@ export default function MechViewport({
 
     sceneHooksRef.current.applyAtmosphere = (preset: AtmospherePreset) => {
       canyon.setAtmosphere(preset, scene, keyLight, hemiLight, rimLight);
+    };
+    sceneHooksRef.current.applyMechStyle = (styleId: MechStyleId) => {
+      mats.applyMechStyle(styleId);
     };
     sceneHooksRef.current.notifyModeChange = (mode: CameraMode) => {
       if (mode !== 'free') {
@@ -484,11 +505,16 @@ export default function MechViewport({
       stepMechKinematics(simState, _mergedInput, delta, groundHeightAt);
       const terrainUnderMech = groundHeightAt(simState.x, simState.z);
       mech.applyPose(simState, elapsed, terrainUnderMech);
-      canyon.update(elapsed, delta);
+      _sandMechCtx.mechX = simState.x;
+      _sandMechCtx.mechY = simState.y - terrainUnderMech;
+      _sandMechCtx.mechZ = simState.z;
+      _sandMechCtx.moveSpeed = simState.moveSpeed;
+      _sandMechCtx.grounded = simState.grounded;
+      canyon.update(elapsed, delta, _sandMechCtx);
 
       const inCockpit = mode === 'cockpit';
       controls.enabled = !inCockpit;
-      cockpitRig.update(simState, _mergedInput, elapsed, inCockpit);
+      cockpitRig.update(simState, _mergedInput, elapsed, inCockpit, propsRef.current.mechStyle);
 
       // Smooth FOV transition (wider 62° inside cockpit windshield, 45° outside)
       const targetFov = inCockpit ? 62 : DEFAULT_DRONE_CONFIG.fovDeg;

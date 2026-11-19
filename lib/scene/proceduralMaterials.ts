@@ -1,13 +1,16 @@
 import * as THREE from 'three';
+import { MECH_STYLES, MechStyleId, getMechStyleConfig } from './mechStyles';
 
 export interface SceneMaterialLibrary {
   armorPrimary: THREE.MeshStandardMaterial;
   armorSecondary: THREE.MeshStandardMaterial;
   armorExtrude: THREE.MeshStandardMaterial;
+  armorAccent: THREE.MeshStandardMaterial;
   innerFrame: THREE.MeshStandardMaterial;
   pistonChrome: THREE.MeshStandardMaterial;
   visorLens: THREE.MeshPhysicalMaterial;
   cyanEmissive: THREE.MeshStandardMaterial;
+  plasmaBladeMat: THREE.MeshBasicMaterial;
   cyanGlowHalo: THREE.MeshBasicMaterial;
   cyanWispMat: THREE.MeshBasicMaterial;
   desertSand: THREE.MeshStandardMaterial;
@@ -15,6 +18,7 @@ export interface SceneMaterialLibrary {
   boulderRock: THREE.MeshStandardMaterial;
   contactShadow: THREE.MeshBasicMaterial;
   dustSpriteTexture: THREE.CanvasTexture;
+  applyMechStyle: (styleId: MechStyleId) => void;
   dispose: () => void;
 }
 
@@ -38,44 +42,46 @@ function createArmorMaps(maxAnisotropy: number) {
   const rCtx = roughCanvas.getContext('2d')!;
   const rImg = rCtx.createImageData(size, size);
 
-  // Fast ImageData synthesis: fine weathered gunmetal-bronze alloy with subtle dust oxidation (zero camo blotches)
+  // High-luminance neutral brushed alloy & subtle micro-grain so style tinting stays vivid and crisp
   for (let y = 0; y < size; y++) {
     const ny = (y / size) * Math.PI * 2;
     for (let x = 0; x < size; x++) {
       const nx = (x / size) * Math.PI * 2;
       const idx = (y * size + x) * 4;
 
-      // Subtle broad oxidized tone shift + fine brushed steel grain
-      const broadPatina =
-        Math.sin(nx + 0.5) * Math.cos(ny - 0.3) * 0.14 +
-        Math.sin(nx * 2 - ny) * 0.08 +
+      const patina =
+        Math.sin(nx * 2 + 0.4) * Math.cos(ny * 2 - 0.5) * 0.1 +
+        Math.sin(nx - ny * 2) * 0.06 +
         0.5;
-      const fineNoise =
-        Math.sin(x * 1.37 + y * 2.13) * Math.cos(x * 2.71 - y * 1.69) * 0.14 +
-        Math.sin(x * 4.3 + y * 0.9) * 0.06;
-      const microBrush = Math.sin(y * 1.45 + Math.sin(x * 0.08) * 1.6) * 0.06 + 0.5;
+      const microBrush = Math.sin(y * 1.85 + Math.sin(x * 0.06) * 1.4) * 0.07 + 0.5;
+      const fineGrain =
+        Math.sin(x * 1.71 + y * 2.27) * Math.cos(x * 2.43 - y * 1.31) * 0.09;
 
-      const rustBlend = Math.max(0, Math.min(1, broadPatina + fineNoise * 0.65));
-      // Warm weathered titanium-bronze (#7e7264) to cool gunmetal slate (#585c61)
-      const r = Math.round(92 + rustBlend * 44 + (microBrush - 0.5) * 12);
-      const g = Math.round(94 + rustBlend * 30 + (microBrush - 0.5) * 11);
-      const b = Math.round(98 + rustBlend * 14 + (microBrush - 0.5) * 10);
+      // Subtle hex-grid weave impression for futuristic composite armor
+      const hexWave =
+        Math.sin((x * 0.35 + y * 0.2)) * Math.sin((x * 0.35 - y * 0.2)) * 0.035;
 
-      aImg.data[idx] = Math.max(0, Math.min(255, r));
-      aImg.data[idx + 1] = Math.max(0, Math.min(255, g));
-      aImg.data[idx + 2] = Math.max(0, Math.min(255, b));
+      const shade = Math.max(0, Math.min(1, 0.78 + (patina - 0.5) * 0.16 + fineGrain + hexWave));
+      const base = Math.round(168 + shade * 68 + (microBrush - 0.5) * 14);
+      const r = Math.max(0, Math.min(255, base + 2));
+      const g = Math.max(0, Math.min(255, base + 1));
+      const b = Math.max(0, Math.min(255, base));
+
+      aImg.data[idx] = r;
+      aImg.data[idx + 1] = g;
+      aImg.data[idx + 2] = b;
       aImg.data[idx + 3] = 255;
 
       const bumpVal = Math.max(
         0,
-        Math.min(255, Math.round(128 + (microBrush - 0.5) * 28 + fineNoise * 65)),
+        Math.min(255, Math.round(132 + (microBrush - 0.5) * 32 + fineGrain * 72 + hexWave * 95)),
       );
       bImg.data[idx] = bumpVal;
       bImg.data[idx + 1] = bumpVal;
       bImg.data[idx + 2] = bumpVal;
       bImg.data[idx + 3] = 255;
 
-      const roughVal = Math.max(85, Math.min(220, Math.round(115 + rustBlend * 72)));
+      const roughVal = Math.max(76, Math.min(210, Math.round(110 + (1 - shade) * 85)));
       rImg.data[idx] = roughVal;
       rImg.data[idx + 1] = roughVal;
       rImg.data[idx + 2] = roughVal;
@@ -87,37 +93,88 @@ function createArmorMaps(maxAnisotropy: number) {
   bCtx.putImageData(bImg, 0, 0);
   rCtx.putImageData(rImg, 0, 0);
 
-  // Crisp subtle panel seam lines (fine alien mechanical seams)
-  aCtx.strokeStyle = 'rgba(22, 24, 28, 0.34)';
-  aCtx.lineWidth = 1.2;
-  bCtx.strokeStyle = 'rgba(42, 42, 42, 0.52)';
-  bCtx.lineWidth = 1.6;
-
-  for (const s of [128, 256, 384]) {
+  // Crisp futuristic armor panel lines + diagonal chamfered tech seams + micro rivets
+  const drawSeam = (x1: number, y1: number, x2: number, y2: number, width = 1.6) => {
+    aCtx.strokeStyle = 'rgba(18, 22, 28, 0.52)';
+    aCtx.lineWidth = width;
     aCtx.beginPath();
-    aCtx.moveTo(0, s);
-    aCtx.lineTo(size, s);
+    aCtx.moveTo(x1, y1);
+    aCtx.lineTo(x2, y2);
     aCtx.stroke();
 
+    // Subtle specular bevel highlight beside seam
+    aCtx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    aCtx.lineWidth = 0.9;
+    aCtx.beginPath();
+    aCtx.moveTo(x1, y1 + 1.6);
+    aCtx.lineTo(x2, y2 + 1.6);
+    aCtx.stroke();
+
+    bCtx.strokeStyle = 'rgba(28, 28, 28, 0.72)';
+    bCtx.lineWidth = width + 0.6;
     bCtx.beginPath();
-    bCtx.moveTo(0, s);
-    bCtx.lineTo(size, s);
+    bCtx.moveTo(x1, y1);
+    bCtx.lineTo(x2, y2);
     bCtx.stroke();
+  };
+
+  for (const s of [96, 256, 416]) {
+    drawSeam(0, s, size, s, 1.8);
+  }
+  for (const x of [128, 384]) {
+    drawSeam(x, 0, x, 96, 1.4);
+    drawSeam(x, 256, x, 416, 1.4);
+  }
+  // Angled mecha panel cuts
+  drawSeam(128, 96, 176, 144, 1.5);
+  drawSeam(176, 144, 336, 144, 1.5);
+  drawSeam(336, 144, 384, 96, 1.5);
+  drawSeam(64, 256, 112, 208, 1.4);
+  drawSeam(448, 256, 400, 208, 1.4);
+
+  // Micro-fastener bolts along panel corners
+  const bolts = [
+    [24, 108],
+    [116, 108],
+    [140, 108],
+    [372, 108],
+    [396, 108],
+    [488, 108],
+    [24, 268],
+    [116, 268],
+    [140, 268],
+    [372, 268],
+    [396, 268],
+    [488, 268],
+    [24, 428],
+    [256, 428],
+    [488, 428],
+  ];
+  for (const [bx, by] of bolts) {
+    aCtx.fillStyle = 'rgba(20, 24, 30, 0.55)';
+    aCtx.beginPath();
+    aCtx.arc(bx, by, 2.4, 0, Math.PI * 2);
+    aCtx.fill();
+
+    bCtx.fillStyle = 'rgba(220, 220, 220, 0.7)';
+    bCtx.beginPath();
+    bCtx.arc(bx, by, 2.6, 0, Math.PI * 2);
+    bCtx.fill();
   }
 
-  // Fine worn metallic edge scratches & weathered dust streaks
+  // Fine worn metallic micro-scratches
   let seed = 7331;
   const rand = () => {
     seed = (seed * 16807) % 2147483647;
     return (seed - 1) / 2147483646;
   };
-  for (let i = 0; i < 240; i++) {
+  for (let i = 0; i < 200; i++) {
     const x = rand() * size;
     const y = rand() * size;
-    const len = 10 + rand() * 34;
-    const ang = (rand() - 0.5) * 0.32;
+    const len = 8 + rand() * 28;
+    const ang = (rand() - 0.5) * 0.28;
     aCtx.strokeStyle =
-      rand() > 0.4 ? 'rgba(218, 210, 198, 0.14)' : 'rgba(24, 26, 30, 0.16)';
+      rand() > 0.45 ? 'rgba(245, 248, 252, 0.16)' : 'rgba(20, 24, 30, 0.18)';
     aCtx.lineWidth = 0.8;
     aCtx.beginPath();
     aCtx.moveTo(x, y);
@@ -219,7 +276,6 @@ function createCliffMaps(maxAnisotropy: number) {
       const nx = (x / size) * Math.PI * 2;
       const idx = (y * size + x) * 4;
 
-      // Craggy vertical & diagonal sandstone fissures + muted strata
       const fissure =
         Math.sin(nx * 4 + Math.sin(ny * 3) * 1.2) * 0.4 +
         Math.cos(nx * 9 - ny * 2) * 0.25 +
@@ -289,89 +345,109 @@ export function createSceneMaterialLibrary(
   const shadowTex = createRadialSoftTexture('rgba(16, 11, 8, 0.85)', 'rgba(16, 11, 8, 0)', 0.38);
   const dustTex = createRadialSoftTexture('rgba(255, 226, 184, 0.72)', 'rgba(255, 226, 184, 0)', 0.08);
 
-  // Primary weathered bronze-slate outer armor plates
+  const initialStyle = MECH_STYLES.apex;
+
+  // Primary outer armor plates (crisp panel-lined brushed titanium-gunmetal alloy)
   const armorPrimary = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
+    color: initialStyle.armorPrimaryColor,
     map: armorMaps.albedo,
     bumpMap: armorMaps.bump,
-    bumpScale: 0.12,
+    bumpScale: 0.14,
     roughnessMap: armorMaps.roughness,
-    roughness: 0.56,
-    metalness: 0.74,
-    envMapIntensity: 1.05,
+    roughness: initialStyle.armorRoughness,
+    metalness: initialStyle.armorMetalness,
+    envMapIntensity: 1.18,
   });
 
-  // Secondary darker oxidized steel/bronze trim
+  // Secondary darker structural armor sub-plates
   const armorSecondary = new THREE.MeshStandardMaterial({
-    color: 0x9b8e80,
+    color: initialStyle.armorSecondaryColor,
     map: armorMaps.albedo,
     bumpMap: armorMaps.bump,
-    bumpScale: 0.1,
-    roughness: 0.46,
-    metalness: 0.84,
-    envMapIntensity: 1.12,
+    bumpScale: 0.11,
+    roughness: 0.44,
+    metalness: 0.86,
+    envMapIntensity: 1.22,
   });
 
-  // UV-independent sculpted alloy for ExtrudeGeometry armor plates (prevents stretched UV seams)
+  // UV-independent sculpted bevel armor (ExtrudeGeometry wings, crest blades, tassets)
   const armorExtrude = new THREE.MeshStandardMaterial({
-    color: 0x766e64,
-    roughness: 0.48,
-    metalness: 0.82,
-    envMapIntensity: 1.1,
+    color: initialStyle.armorExtrudeColor,
+    roughness: 0.42,
+    metalness: 0.84,
+    envMapIntensity: 1.24,
   });
 
-  // Inner skeletal dark obsidian-titanium frame & joints (smooth contrast >= 0.30)
+  // Anodized / Gilded high-contrast metallic accent trim (V-fins, reactor rim, pauldrons, knee crests)
+  const armorAccent = new THREE.MeshStandardMaterial({
+    color: initialStyle.armorAccentColor,
+    roughness: initialStyle.accentRoughness,
+    metalness: initialStyle.accentMetalness,
+    envMapIntensity: 1.48,
+  });
+
+  // Inner skeletal dark obsidian-titanium frame & joints
   const innerFrame = new THREE.MeshStandardMaterial({
-    color: 0x1d2328,
-    roughness: 0.3,
-    metalness: 0.9,
-    envMapIntensity: 1.2,
+    color: initialStyle.innerFrameColor,
+    roughness: 0.28,
+    metalness: 0.92,
+    envMapIntensity: 1.25,
   });
 
-  // Brushed hydraulic piston rods
+  // Mirror-brushed hydraulic piston rods
   const pistonChrome = new THREE.MeshStandardMaterial({
-    color: 0xb7c2cc,
-    roughness: 0.16,
-    metalness: 0.96,
-    envMapIntensity: 1.35,
+    color: 0xc5d0db,
+    roughness: 0.14,
+    metalness: 0.97,
+    envMapIntensity: 1.45,
   });
 
-  // Optical visor / dark glass core
+  // Optical visor / dark glass housing
   const visorLens = new THREE.MeshPhysicalMaterial({
-    color: 0x071620,
-    roughness: 0.1,
-    metalness: 0.15,
+    color: 0x061018,
+    roughness: 0.08,
+    metalness: 0.2,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.08,
-    ior: 1.7,
+    clearcoatRoughness: 0.06,
+    ior: 1.75,
     transparent: isSoftwareGl,
     opacity: 1,
   });
 
-  // Saturated electric cyan-blue reactor vents (vibrant cyan on both GPU & Software WebGL)
+  // Saturated plasma reactor / visor / conduit emissive material
   const cyanEmissive = new THREE.MeshStandardMaterial({
-    color: 0x00e1ff,
-    emissive: new THREE.Color(0x00bfff),
-    emissiveIntensity: isSoftwareGl ? 1.45 : 2.1,
-    roughness: 0.25,
+    color: initialStyle.emissiveColor,
+    emissive: new THREE.Color(initialStyle.emissiveGlowColor),
+    emissiveIntensity: isSoftwareGl ? 1.55 : 2.3,
+    roughness: 0.2,
     metalness: 0.05,
     toneMapped: isSoftwareGl,
   });
 
-  const cyanGlowHalo = new THREE.MeshBasicMaterial({
-    color: 0x00d8ff,
+  // Luminous translucent forearm plasma blade & jet thruster flame material
+  const plasmaBladeMat = new THREE.MeshBasicMaterial({
+    color: initialStyle.emissiveColor,
     transparent: true,
-    opacity: 0.32,
+    opacity: 0.78,
+    blending: THREE.NormalBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  const cyanGlowHalo = new THREE.MeshBasicMaterial({
+    color: initialStyle.emissiveGlowColor,
+    transparent: true,
+    opacity: 0.34,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
 
   const cyanWispMat = new THREE.MeshBasicMaterial({
-    color: 0x4aeaff,
+    color: initialStyle.wispColor,
     map: dustTex,
     transparent: true,
-    opacity: 0.2,
+    opacity: 0.22,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
@@ -414,14 +490,38 @@ export function createSceneMaterialLibrary(
     depthWrite: false,
   });
 
+  const applyMechStyle = (styleId: MechStyleId) => {
+    const cfg = getMechStyleConfig(styleId);
+    armorPrimary.color.setHex(cfg.armorPrimaryColor);
+    armorPrimary.roughness = cfg.armorRoughness;
+    armorPrimary.metalness = cfg.armorMetalness;
+
+    armorSecondary.color.setHex(cfg.armorSecondaryColor);
+    armorExtrude.color.setHex(cfg.armorExtrudeColor);
+
+    armorAccent.color.setHex(cfg.armorAccentColor);
+    armorAccent.roughness = cfg.accentRoughness;
+    armorAccent.metalness = cfg.accentMetalness;
+
+    innerFrame.color.setHex(cfg.innerFrameColor);
+
+    cyanEmissive.color.setHex(cfg.emissiveColor);
+    cyanEmissive.emissive.setHex(cfg.emissiveGlowColor);
+    plasmaBladeMat.color.setHex(cfg.emissiveColor);
+    cyanGlowHalo.color.setHex(cfg.emissiveGlowColor);
+    cyanWispMat.color.setHex(cfg.wispColor);
+  };
+
   const allMaterials = [
     armorPrimary,
     armorSecondary,
     armorExtrude,
+    armorAccent,
     innerFrame,
     pistonChrome,
     visorLens,
     cyanEmissive,
+    plasmaBladeMat,
     cyanGlowHalo,
     cyanWispMat,
     desertSand,
@@ -445,10 +545,12 @@ export function createSceneMaterialLibrary(
     armorPrimary,
     armorSecondary,
     armorExtrude,
+    armorAccent,
     innerFrame,
     pistonChrome,
     visorLens,
     cyanEmissive,
+    plasmaBladeMat,
     cyanGlowHalo,
     cyanWispMat,
     desertSand,
@@ -456,6 +558,7 @@ export function createSceneMaterialLibrary(
     boulderRock,
     contactShadow,
     dustSpriteTexture: dustTex,
+    applyMechStyle,
     dispose: () => {
       allMaterials.forEach((m) => m.dispose());
       allTextures.forEach((t) => t.dispose());

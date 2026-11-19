@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { MechInputState, MechSimulationState } from './mechController';
+import { MechStyleId, getMechStyleConfig } from './mechStyles';
 import { SceneMaterialLibrary } from './proceduralMaterials';
 
 export interface CockpitRigHandle {
@@ -9,6 +10,7 @@ export interface CockpitRigHandle {
     input: MechInputState,
     elapsedSec: number,
     visible: boolean,
+    styleId: MechStyleId,
   ) => void;
   dispose: () => void;
 }
@@ -239,15 +241,24 @@ export function buildCockpitRig(
 
   let lastHudDrawSec = -1;
 
-  const drawHudScreen = (sim: MechSimulationState, input: MechInputState) => {
+  const drawHudScreen = (
+    sim: MechSimulationState,
+    input: MechInputState,
+    styleId: MechStyleId,
+  ) => {
+    const style = getMechStyleConfig(styleId);
+    const primary = style.hudPrimaryHex;
+    const secondary = style.hudSecondaryHex;
+
     ctx.clearRect(0, 0, 512, 256);
 
     // Dark tactical CRT background
-    ctx.fillStyle = '#071319';
+    ctx.fillStyle = '#071015';
     ctx.fillRect(0, 0, 512, 256);
 
     // Subtle gridlines
-    ctx.strokeStyle = 'rgba(0, 210, 255, 0.16)';
+    ctx.globalAlpha = 0.16;
+    ctx.strokeStyle = primary;
     ctx.lineWidth = 1;
     for (let x = 32; x < 512; x += 48) {
       ctx.beginPath();
@@ -261,33 +272,34 @@ export function buildCockpitRig(
       ctx.lineTo(512, y);
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
 
     // Left: Mech Silhouette / Limb Telemetry
-    ctx.strokeStyle = '#00e1ff';
+    ctx.strokeStyle = primary;
     ctx.lineWidth = 2.5;
     ctx.strokeRect(14, 14, 484, 228);
 
-    ctx.fillStyle = '#8ef0ff';
+    ctx.fillStyle = secondary;
     ctx.font = 'bold 16px monospace';
-    ctx.fillText('KRONOS-VII // COCKPIT LINK', 28, 42);
+    ctx.fillText(`KRONOS-VII // ${styleId.toUpperCase()} LINK`, 28, 42);
 
-    ctx.fillStyle = sim.boostActive ? '#ffb84d' : '#2ee6ff';
+    ctx.fillStyle = sim.boostActive ? '#ffb84d' : primary;
     ctx.font = 'bold 14px monospace';
     ctx.fillText(
       sim.grounded
-        ? `SPD ${Math.abs(sim.moveSpeed).toFixed(1)} m/s   ALT ${(sim.y).toFixed(1)}m`
-        : `AIRBORNE THRUST   ALT ${(sim.y).toFixed(1)}m`,
+        ? `SPD ${Math.abs(sim.moveSpeed).toFixed(1)} m/s   ALT ${sim.y.toFixed(1)}m`
+        : `AIRBORNE THRUST   ALT ${sim.y.toFixed(1)}m`,
       28,
       68,
     );
 
     // Limb active readouts
     const limbRow = (label: string, active: boolean, x: number, y: number) => {
-      ctx.fillStyle = active ? 'rgba(0, 225, 255, 0.28)' : 'rgba(18, 36, 46, 0.8)';
+      ctx.fillStyle = active ? 'rgba(255, 255, 255, 0.2)' : 'rgba(18, 28, 36, 0.84)';
       ctx.fillRect(x, y, 134, 30);
-      ctx.strokeStyle = active ? '#00f0ff' : 'rgba(0, 225, 255, 0.35)';
+      ctx.strokeStyle = active ? primary : 'rgba(255, 255, 255, 0.22)';
       ctx.strokeRect(x, y, 134, 30);
-      ctx.fillStyle = active ? '#ffffff' : '#7ac5d4';
+      ctx.fillStyle = active ? '#ffffff' : secondary;
       ctx.font = 'bold 13px monospace';
       ctx.fillText(label, x + 10, y + 20);
     };
@@ -302,13 +314,15 @@ export function buildCockpitRig(
     // Right: Mini Horizon / Canyon Compass Radar
     const cx = 408;
     const cy = 136;
-    ctx.strokeStyle = 'rgba(0, 225, 255, 0.5)';
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = primary;
     ctx.beginPath();
     ctx.arc(cx, cy, 62, 0, Math.PI * 2);
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(cx, cy, 34, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.globalAlpha = 1;
 
     // Mech position dot inside canyon basin
     const mx = cx + (sim.x / 120) * 54;
@@ -316,7 +330,7 @@ export function buildCockpitRig(
     ctx.save();
     ctx.translate(mx, mz);
     ctx.rotate(-sim.yaw);
-    ctx.fillStyle = '#00f5ff';
+    ctx.fillStyle = primary;
     ctx.beginPath();
     ctx.moveTo(0, 8);
     ctx.lineTo(-6, -6);
@@ -325,18 +339,21 @@ export function buildCockpitRig(
     ctx.fill();
     ctx.restore();
 
-    ctx.fillStyle = '#7cd7e8';
+    ctx.fillStyle = secondary;
     ctx.font = '12px monospace';
     ctx.fillText('CANYON RADAR', 362, 222);
 
     hudTexture.needsUpdate = true;
   };
 
+  let lastDrawnStyle: MechStyleId = 'apex';
+
   const update = (
     sim: MechSimulationState,
     input: MechInputState,
     elapsedSec: number,
     visible: boolean,
+    styleId: MechStyleId,
   ) => {
     root.visible = visible;
     if (!visible) return;
@@ -365,10 +382,11 @@ export function buildCockpitRig(
     const throttleZ = -0.6 - (Math.abs(sim.moveSpeed) / 26.0) * 0.055;
     throttleHandle.position.z = throttleZ;
 
-    // Refresh tactical CRT screen ~10Hz
-    if (elapsedSec - lastHudDrawSec >= 0.09) {
+    // Refresh tactical CRT screen ~10Hz or immediately on style change
+    if (elapsedSec - lastHudDrawSec >= 0.09 || styleId !== lastDrawnStyle) {
       lastHudDrawSec = elapsedSec;
-      drawHudScreen(sim, input);
+      lastDrawnStyle = styleId;
+      drawHudScreen(sim, input, styleId);
     }
   };
 
