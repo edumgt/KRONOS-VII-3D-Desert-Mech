@@ -27,6 +27,7 @@ import {
 import { createSceneMaterialLibrary } from '@/lib/scene/proceduralMaterials';
 import { MechStyleId } from '@/lib/scene/mechStyles';
 import { buildAlienMech } from '@/lib/scene/buildAlienMech';
+import { buildCompanionSquadron } from '@/lib/scene/buildCompanionSquadron';
 import { buildCockpitRig } from '@/lib/scene/buildCockpitRig';
 import { buildDesertCanyon } from '@/lib/scene/buildDesertCanyon';
 
@@ -67,6 +68,7 @@ const _sandMechCtx = {
   moveSpeed: 0,
   grounded: true,
 };
+const _heroAnchor = { x: 0, z: 0 };
 
 function mapCodeToAction(code: string): MechActionKey | null {
   switch (code) {
@@ -310,6 +312,9 @@ export default function MechViewport({
     const mech = buildAlienMech(mats);
     scene.add(mech.group);
 
+    const squadron = buildCompanionSquadron(mats);
+    scene.add(squadron.group);
+
     const cockpitRig = buildCockpitRig(mats, renderer.capabilities.getMaxAnisotropy());
     camera.add(cockpitRig.group);
 
@@ -405,6 +410,7 @@ export default function MechViewport({
       orbitAngle = 0.14;
       Object.assign(simState, createInitialMechState());
       simState.y = groundHeightAt(simState.x, simState.z);
+      squadron.reset();
       transitionAlpha = 0;
     };
 
@@ -505,6 +511,9 @@ export default function MechViewport({
       stepMechKinematics(simState, _mergedInput, delta, groundHeightAt);
       const terrainUnderMech = groundHeightAt(simState.x, simState.z);
       mech.applyPose(simState, elapsed, terrainUnderMech);
+      _heroAnchor.x = simState.x;
+      _heroAnchor.z = simState.z;
+      squadron.update(elapsed, delta, _heroAnchor);
       _sandMechCtx.mechX = simState.x;
       _sandMechCtx.mechY = simState.y - terrainUnderMech;
       _sandMechCtx.mechZ = simState.z;
@@ -620,6 +629,7 @@ export default function MechViewport({
       canvas.removeEventListener('webglcontextlost', onContextLost);
       canvas.removeEventListener('webglcontextrestored', onContextRestored);
       cockpitRig.dispose();
+      squadron.dispose();
       mech.dispose();
       canyon.dispose();
       mats.dispose();
